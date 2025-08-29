@@ -1,20 +1,19 @@
 import os
 import struct
 from .keydir import KeyDir, KeyEntry
-from .lockfile import LockFile
 
-HEADER_SIZE = 16
-HEADER_FORMAT = "<LLL"
-THRESHOLD = 1024 * 1024 * 10  # 10MB
+HEADER_SIZE = 12 # 4 bytes for timestamp, key size, value size
+HEADER_FORMAT = "<LLL" # little endian order with 3 unsigned long
+THRESHOLD = 1024 * 1024 * 10  # 10MB file size threshold for rotation
 
 
 class PyCask:
-    _instances = {}
+    _instance = None
 
-    def __new__(cls, path):
-        if path not in cls._instances:
-            cls._instances[path] = super().__new__(cls)
-        return cls._instances[path]
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, path):
         self.keydir = KeyDir()
@@ -43,29 +42,25 @@ class PyCask:
         return [f for f in os.listdir(self.path) if f.endswith(".data")]
 
     def _load_keydir(self):
-        with LockFile(self.path):
-            files = self._get_files()
-            for file in files:
-                file_id = self._convert_filename_to_id(file)
-                file_path = os.path.join(self.path, file)
-                with open(file_path, "rb") as f:
-                    while chunk := f.read(HEADER_SIZE):
-                        if len(chunk) < HEADER_SIZE:
-                            break
+        files = self._get_files()
+        for file in files:
+            file_id = self._convert_filename_to_id(file)
+            file_path = os.path.join(self.path, file)
+            with open(file_path, "rb") as f:
+                while chunk := f.read(HEADER_SIZE):
+                    timestamp, key_size, value_size = self._decode_header(chunk)
+                    key = f.read(key_size).decode("utf-8")
+                    value_pos = f.tell()
 
-                        timestamp, key_size, value_size = self._decode_header(chunk)
-                        key = f.read(key_size).decode("utf-8")
-                        value_pos = f.tell()
+                    self.keydir[key] = KeyEntry(
+                        file_id=file_id,
+                        value_size=value_size,
+                        value_pos=value_pos,
+                        timestamp=timestamp
+                    )
 
-                        self.keydir[key] = KeyEntry(
-                            file_id=file_id,
-                            value_size=value_size,
-                            value_pos=value_pos,
-                            timestamp=timestamp
-                        )
-
-                        f.seek(value_size, os.SEEK_CUR)
-                        self.cursor = f.tell()
+                    f.seek(value_size, os.SEEK_CUR)
+                    self.cursor = f.tell()
 
     def _create_file(self, file_id=0):
         file_path = os.path.join(self.path, self._convert_id_to_filename(file_id))
