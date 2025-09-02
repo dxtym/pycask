@@ -1,8 +1,8 @@
-from .pycask import PyCask
+from .pycask import Pycask
 from .keydir import KeyDir, KeyEntry
 
 __all__ = [
-    "PyCask",
+    "Pycask",
     "KeyDir",
     "KeyEntry",
 ]
