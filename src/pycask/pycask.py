@@ -1,16 +1,18 @@
 import os
+import time
 import struct
 from .keydir import KeyDir, KeyEntry
 
-HEADER_SIZE = 12 # 4 bytes for timestamp, key size, value size
-HEADER_FORMAT = "<LLL" # little endian order with 3 unsigned long
+TOMBSTONE = 0  # value size of 0 indicates a deleted entry
+HEADER_SIZE = 12  # 4 bytes for timestamp, key size, value size
+HEADER_FORMAT = "<LLL"  # little endian order with 3 unsigned long
 THRESHOLD = 1024 * 1024 * 10  # 10MB file size threshold for rotation
 
 
 class PyCask:
     _instance = None
 
-    def __new__(cls):
+    def __new__(cls, path):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -18,7 +20,6 @@ class PyCask:
     def __init__(self, path):
         self.keydir = KeyDir()
 
-        self.cursor = 0
         self.path = os.path.abspath(path)
         if not os.path.exists(self.path):
             os.makedirs(self.path)
@@ -32,23 +33,28 @@ class PyCask:
     def _encode_header(self, timestamp, key_size, value_size):
         return struct.pack(HEADER_FORMAT, timestamp, key_size, value_size)
 
-    def _convert_filename_to_id(self, filename):
+    def _filename_to_id(self, filename):
         return int(filename.split('.')[0])
 
-    def _convert_id_to_filename(self, file_id):
+    def _id_to_filename(self, file_id):
         return "{:06d}.data".format(file_id)
 
     def _get_files(self):
-        return [f for f in os.listdir(self.path) if f.endswith(".data")]
+        return sorted([f for f in os.listdir(self.path) if f.endswith(".data")])
 
     def _load_keydir(self):
         files = self._get_files()
         for file in files:
-            file_id = self._convert_filename_to_id(file)
+            file_id = self._filename_to_id(file)
             file_path = os.path.join(self.path, file)
+
             with open(file_path, "rb") as f:
-                while chunk := f.read(HEADER_SIZE):
-                    timestamp, key_size, value_size = self._decode_header(chunk)
+                while header_bytes := f.read(HEADER_SIZE):
+                    timestamp, key_size, value_size = self._decode_header(header_bytes)
+                    if value_size == 0:
+                        f.seek(key_size, os.SEEK_CUR)
+                        continue
+
                     key = f.read(key_size).decode("utf-8")
                     value_pos = f.tell()
 
@@ -60,10 +66,9 @@ class PyCask:
                     )
 
                     f.seek(value_size, os.SEEK_CUR)
-                    self.cursor = f.tell()
 
     def _create_file(self, file_id=0):
-        file_path = os.path.join(self.path, self._convert_id_to_filename(file_id))
+        file_path = os.path.join(self.path, self._id_to_filename(file_id))
         return open(file_path, "ab+")
 
     def _get_active_file(self):
@@ -71,20 +76,85 @@ class PyCask:
         if not files:
             return self._create_file()
 
-        files.sort()
         latest_file = files[-1]
-        latest_file_id = self._convert_filename_to_id(latest_file)
         latest_file_path = os.path.join(self.path, latest_file)
-        if os.path.getsize(latest_file_path) >= THRESHOLD:
+        latest_file_id = self._filename_to_id(latest_file)
+        latest_file_size = self._get_expected_file_size()
+
+        if latest_file_size >= THRESHOLD:
             return self._create_file(latest_file_id + 1)
 
         return open(latest_file_path, "ab+")
 
+    def _get_expected_file_size(self, key_size=0, value_size=0):
+        file_size = os.path.getsize(self._active_file.name)
+        entry_size = HEADER_SIZE + key_size + value_size
+        return file_size + entry_size
+
     def put(self, key, value):
-        raise NotImplementedError
+        now = int(time.time())
+        key_bytes, value_bytes = key.encode("utf-8"), value.encode("utf-8")
+        key_size, value_size = len(key_bytes), len(value_bytes)
+        header = self._encode_header(now, key_size, value_size)
+
+        filename = os.path.basename(self._active_file.name)
+        file_id = self._filename_to_id(filename)
+        file_size = self._get_expected_file_size(key_size, value_size)
+
+        if file_size >= THRESHOLD:
+            self._active_file.close()
+            self._active_file = self._create_file(file_id + 1)
+
+        self._active_file.write(header)
+        self._active_file.write(key_bytes)
+        value_pos = self._active_file.tell()
+        self._active_file.write(value_bytes)
+        self._active_file.flush()
+
+        self.keydir[key] = KeyEntry(
+                file_id=file_id,
+                value_size=value_size,
+                value_pos=value_pos,
+                timestamp=now
+            )
 
     def get(self, key):
-        raise NotImplementedError
+        key_entry = self.keydir.get(key, None)
+        if key_entry is None:
+            raise KeyError(f"Key '{key}' not found.")
+
+        if key_entry.value_size == 0:
+            raise KeyError(f"Key '{key}' has been deleted.")
+
+        filename = self._id_to_filename(key_entry.file_id)
+        file_path = os.path.join(self.path, filename)
+
+        with open(file_path, "rb") as f:
+            f.seek(key_entry.value_pos)
+            value = f.read(key_entry.value_size).decode("utf-8")
+
+        return value
 
     def delete(self, key):
-        raise NotImplementedError
+        value = self.keydir.pop(key, None)
+        if value is None:
+            raise KeyError(f"Key '{key}' not found.")
+
+        now = int(time.time())
+        key_size = len(key.encode("utf-8"))
+        value_size = TOMBSTONE
+        header = self._encode_header(now, key_size, value_size)
+
+        key_bytes = key.encode("utf-8")
+        filename = os.path.basename(self._active_file.name)
+        file_id = self._filename_to_id(filename)
+        file_size = os.path.getsize(self._active_file.name)
+        entry_size = HEADER_SIZE + key_size + value_size
+
+        if file_size + entry_size >= THRESHOLD:
+            self._active_file.close()
+            self._active_file = self._create_file(file_id + 1)
+
+        self._active_file.write(header)
+        self._active_file.write(key_bytes)
+        self._active_file.flush()
