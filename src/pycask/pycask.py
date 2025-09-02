@@ -7,7 +7,7 @@ from .keydir import KeyDir, KeyEntry
 TOMBSTONE = 0  # value size of 0 indicates a deleted entry
 HEADER_SIZE = 12  # 4 bytes for timestamp, key size, value size
 HEADER_FORMAT = "<LLL"  # little endian order with 3 unsigned long
-FILES_LIMIT = 20  # max number of files before triggering a merge
+FILES_LIMIT = 10  # max number of files before triggering a merge
 THRESHOLD = 1024 * 1024 * 10  # 10MB file size threshold for rotation
 
 
@@ -90,11 +90,11 @@ class Pycask:
         return open(latest_file_path, "ab+")
 
     def _get_expected_file_size(self, filename, key_size=0, value_size=0):
-        file_size = os.path.getsize(filename)
+        file_size = os.path.getsize(os.path.join(self.path, filename))
         entry_size = HEADER_SIZE + key_size + value_size
         return file_size + entry_size
 
-    def _run_merge(self, interval=600):
+    def _run_merge(self, interval=60):
         def wrapper():
             while True:
                 time.sleep(interval)
@@ -105,6 +105,9 @@ class Pycask:
         t.start()
 
     def _merge(self):
+        files = self._get_files()
+        files.remove(os.path.basename(self._active_file.name))
+
         filename = os.path.basename(self._active_file.name)
         new_file = self._create_file(self._filename_to_id(filename) + 1)
 
@@ -140,6 +143,9 @@ class Pycask:
                 value_pos=value_pos,
                 timestamp=entry.timestamp
             )
+
+        for file in files:
+            os.remove(os.path.join(self.path, file))
 
     def put(self, key, value):
         now = int(time.time())
