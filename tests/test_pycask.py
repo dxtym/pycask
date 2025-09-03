@@ -1,12 +1,13 @@
-import time
+import os
 import pytest
 import tempfile
 from pycask import Pycask
 
 @pytest.mark.parametrize("key, value", [
-    ("key1", "value1"),
-    ("key2", "value2"),
-    ("key3", "value3"),
+    ("1", 1),
+    ("2", "2"),
+    ("3", [1, 2, 3]),
+    ("4", {"a": 1, "b": 2}),
 ])
 def test_key_value_put_and_get(key, value):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -15,9 +16,10 @@ def test_key_value_put_and_get(key, value):
         assert p.get(key) == value
 
 @pytest.mark.parametrize("key, value", [
-    ("key1", "value1"),
-    ("key2", "value2"),
-    ("key3", "value3"),
+    ("1", 1),
+    ("2", "2"),
+    ("3", [1, 2, 3]),
+    ("4", {"a": 1, "b": 2}),
 ])
 def test_key_value_delete(key, value):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -28,10 +30,10 @@ def test_key_value_delete(key, value):
             p.get(key)
 
 @pytest.mark.parametrize("keys, values", [
-    (
-        ["key1", "key2", "key3", "key1", "key4", "key6", "key7", "key8", "key5", "key2"],
-        ["value1", "value2", "value3", "value5", "value4", "value6", "value7", "value8", "value9", "value10"]
-    ),
+    (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+    (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),
+    (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], [[1], [2], [3], [4], [5], [6], [7], [8], [9], [10]]),
+    (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], [{"a": 1}, {"b": 2}, {"c": 3}, {"d": 4}, {"e": 5}, {"f": 6}, {"g": 7}, {"h": 8}, {"i": 9}, {"j": 10}]),
 ])
 def test_merge(keys, values):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -40,6 +42,8 @@ def test_merge(keys, values):
         for key, value in zip(keys, values):
             p.put(key, value)
             mem[key] = value
-        time.sleep(60)
+        p._merge()
+
+        assert len(os.listdir(temp_dir)) == 2
         for key, value in mem.items():
             assert p.get(key) == value

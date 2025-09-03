@@ -1,25 +1,30 @@
 import os
-import threading
 import time
 import struct
+import pickle
+import threading
+from typing import Any, TextIO
 from .keydir import KeyDir, KeyEntry
+from .const import (
+    DEFAULT_PATH,
+    HEADER_FORMAT,
+    HEADER_SIZE,
+    THRESHOLD,
+    LIMIT,
+    TOMBSTONE
+)
 
-TOMBSTONE = 0  # value size of 0 indicates a deleted entry
-HEADER_SIZE = 12  # 4 bytes for timestamp, key size, value size
-HEADER_FORMAT = "<LLL"  # little endian order with 3 unsigned long
-FILES_LIMIT = 10  # max number of files before triggering a merge
-THRESHOLD = 1024 * 1024 * 10  # 10MB file size threshold for rotation
 
 
 class Pycask:
     _instance = None
 
-    def __new__(cls, path):
+    def __new__(cls, path: str = DEFAULT_PATH):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, path):
+    def __init__(self, path: str = DEFAULT_PATH):
         self.keydir = KeyDir()
 
         self.path = os.path.abspath(path)
@@ -30,22 +35,22 @@ class Pycask:
         self._run_merge()
         self._active_file = self._get_active_file()
 
-    def _decode_header(self, header_bytes):
+    def _decode_header(self, header_bytes: bytes) -> tuple[int, int, int]:
         return struct.unpack(HEADER_FORMAT, header_bytes)
 
-    def _encode_header(self, timestamp, key_size, value_size):
+    def _encode_header(self, timestamp: int, key_size: int, value_size: int) -> bytes:
         return struct.pack(HEADER_FORMAT, timestamp, key_size, value_size)
 
-    def _filename_to_id(self, filename):
+    def _filename_to_id(self, filename: str) -> int:
         return int(filename.split('.')[0])
 
-    def _id_to_filename(self, file_id):
+    def _id_to_filename(self, file_id: int) -> str:
         return "{:06d}.data".format(file_id)
 
-    def _get_files(self):
+    def _get_files(self) -> list[str]:
         return sorted([f for f in os.listdir(self.path) if f.endswith(".data")])
 
-    def _load_keydir(self):
+    def _load_keydir(self) -> None:
         files = self._get_files()
         for file in files:
             file_id = self._filename_to_id(file)
@@ -70,11 +75,11 @@ class Pycask:
 
                     f.seek(value_size, os.SEEK_CUR)
 
-    def _create_file(self, file_id=0):
+    def _create_file(self, file_id: int = 0) -> TextIO:
         file_path = os.path.join(self.path, self._id_to_filename(file_id))
         return open(file_path, "ab+")
 
-    def _get_active_file(self):
+    def _get_active_file(self) -> TextIO:
         files = self._get_files()
         if not files:
             return self._create_file()
@@ -89,17 +94,17 @@ class Pycask:
         latest_file_path = os.path.join(self.path, latest_file)
         return open(latest_file_path, "ab+")
 
-    def _get_expected_file_size(self, filename, key_size=0, value_size=0):
+    def _get_expected_file_size(self, filename: str, key_size: int = 0, value_size: int = 0) -> int:
         file_size = os.path.getsize(os.path.join(self.path, filename))
         entry_size = HEADER_SIZE + key_size + value_size
         return file_size + entry_size
 
-    def _run_merge(self, interval=60):
+    def _run_merge(self, interval: int = 60) -> None:
         def wrapper():
             while True:
                 time.sleep(interval)
                 files = self._get_files()
-                if len(files) >= FILES_LIMIT:
+                if len(files) >= LIMIT:
                     self._merge()
         t = threading.Thread(target=wrapper, daemon=True)
         t.start()
@@ -117,17 +122,17 @@ class Pycask:
 
             with open(old_file_path, "rb") as f:
                 f.seek(entry.value_pos)
-                value = f.read(entry.value_size).decode("utf-8")
+                value = pickle.loads(f.read(entry.value_size))
+
+            key_bytes, value_bytes = key.encode("utf-8"), pickle.dumps(value)
+            key_size, value_size = len(key_bytes), len(value_bytes)
+            header = self._encode_header(entry.timestamp, key_size, value_size)
 
             new_filename = os.path.basename(new_file.name)
-            new_file_size = self._get_expected_file_size(new_filename, entry.key_size, entry.value_size)
+            new_file_size = self._get_expected_file_size(new_filename, key_size, value_size)
             if new_file_size >= THRESHOLD:
                 new_file.close()
                 new_file = self._create_file(self._filename_to_id(new_filename) + 1)
-
-            key_bytes, value_bytes = key.encode("utf-8"), value.encode("utf-8")
-            key_size, value_size = len(key_bytes), len(value_bytes)
-            header = self._encode_header(entry.timestamp, key_size, value_size)
 
             file_id = self._filename_to_id(os.path.basename(new_file.name))
 
@@ -147,9 +152,9 @@ class Pycask:
         for file in files:
             os.remove(os.path.join(self.path, file))
 
-    def put(self, key, value):
+    def put(self, key: str, value: Any) -> None:
         now = int(time.time())
-        key_bytes, value_bytes = key.encode("utf-8"), value.encode("utf-8")
+        key_bytes, value_bytes = key.encode("utf-8"), pickle.dumps(value)
         key_size, value_size = len(key_bytes), len(value_bytes)
         header = self._encode_header(now, key_size, value_size)
 
@@ -175,11 +180,10 @@ class Pycask:
                 timestamp=now
             )
 
-    def get(self, key):
+    def get(self, key: str) -> Any:
         entry = self.keydir.get(key, None)
         if entry is None:
             raise KeyError(f"Key '{key}' not found.")
-
         if entry.value_size == 0:
             raise KeyError(f"Key '{key}' has been deleted.")
 
@@ -188,11 +192,11 @@ class Pycask:
 
         with open(file_path, "rb") as f:
             f.seek(entry.value_pos)
-            value = f.read(entry.value_size).decode("utf-8")
+            value = pickle.loads(f.read(entry.value_size))
 
         return value
 
-    def delete(self, key):
+    def delete(self, key: str) -> None:
         entry = self.keydir.pop(key, None)
         if entry is None:
             raise KeyError(f"Key '{key}' not found.")
