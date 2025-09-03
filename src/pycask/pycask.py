@@ -36,21 +36,27 @@ class Pycask:
         self._active_file = self._get_active_file()
 
     def _decode_header(self, header_bytes: bytes) -> tuple[int, int, int]:
+        """Decode the header bytes into timestamp, key size, and value size."""
         return struct.unpack(HEADER_FORMAT, header_bytes)
 
     def _encode_header(self, timestamp: int, key_size: int, value_size: int) -> bytes:
+        """Encode the timestamp, key size, and value size into header bytes."""
         return struct.pack(HEADER_FORMAT, timestamp, key_size, value_size)
 
     def _filename_to_id(self, filename: str) -> int:
+        """Extract the file ID from the filename."""
         return int(filename.split('.')[0])
 
     def _id_to_filename(self, file_id: int) -> str:
+        """Convert the file ID to the filename."""
         return "{:06d}.data".format(file_id)
 
     def _get_files(self) -> list[str]:
+        """Get a sorted list of data files."""
         return sorted([f for f in os.listdir(self.path) if f.endswith(".data")])
 
     def _load_keydir(self) -> None:
+        """Load the keydir from existing data files."""
         files = self._get_files()
         for file in files:
             file_id = self._filename_to_id(file)
@@ -76,10 +82,12 @@ class Pycask:
                     f.seek(value_size, os.SEEK_CUR)
 
     def _create_file(self, file_id: int = 0) -> TextIO:
+        """Create a new data file with the given file ID."""
         file_path = os.path.join(self.path, self._id_to_filename(file_id))
         return open(file_path, "ab+")
 
     def _get_active_file(self) -> TextIO:
+        """Get the current active file for writing."""
         files = self._get_files()
         if not files:
             return self._create_file()
@@ -95,11 +103,13 @@ class Pycask:
         return open(latest_file_path, "ab+")
 
     def _get_expected_file_size(self, filename: str, key_size: int = 0, value_size: int = 0) -> int:
+        """Calculate the expected file size after adding a new entry."""
         file_size = os.path.getsize(os.path.join(self.path, filename))
         entry_size = HEADER_SIZE + key_size + value_size
         return file_size + entry_size
 
     def _run_merge(self, interval: int = 60) -> None:
+        """Run the merge process on a separate thread."""
         def wrapper():
             while True:
                 time.sleep(interval)
@@ -110,6 +120,7 @@ class Pycask:
         t.start()
 
     def _merge(self):
+        """Merge data files to remove obsolete entries and reduce storage."""
         files = self._get_files()
         files.remove(os.path.basename(self._active_file.name))
 
@@ -149,10 +160,10 @@ class Pycask:
                 timestamp=entry.timestamp
             )
 
-        for file in files:
-            os.remove(os.path.join(self.path, file))
+        for file in files: os.remove(os.path.join(self.path, file))
 
     def put(self, key: str, value: Any) -> None:
+        """Store a key-value pair."""
         now = int(time.time())
         key_bytes, value_bytes = key.encode("utf-8"), pickle.dumps(value)
         key_size, value_size = len(key_bytes), len(value_bytes)
@@ -181,6 +192,7 @@ class Pycask:
             )
 
     def get(self, key: str) -> Any:
+        """Retrieve the value associated with the given key."""
         entry = self.keydir.get(key, None)
         if entry is None:
             raise KeyError(f"Key '{key}' not found.")
@@ -197,6 +209,7 @@ class Pycask:
         return value
 
     def delete(self, key: str) -> None:
+        """Delete the value associated with the given key."""
         entry = self.keydir.pop(key, None)
         if entry is None:
             raise KeyError(f"Key '{key}' not found.")

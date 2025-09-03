@@ -14,10 +14,13 @@ class KeyDir(dict):
         super().__init__(*args, **kwargs)
 
     def __setitem__(self, key: str, value: KeyEntry) -> None:
+        """Set a key-value pair in the keydir."""
         super().__setitem__(key, value)
 
     def __getitem__(self, key: str) -> KeyEntry:
+        """Get a key-value pair from the keydir."""
         return super().__getitem__(key)
 
     def __delitem__(self, key: str) -> None:
+        """Delete a key-value pair from the keydir."""
         super().__delitem__(key)
