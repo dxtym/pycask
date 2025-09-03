@@ -37,12 +37,12 @@ value = p.get('key1')
 
 ## Development
 
-1.Install with dev dependencies:
+1. Install with dev dependencies:
 ```bash
 poetry install --with dev
 ```
 
-2.Run unit tests:
+2. Run unit tests:
 ```bash
 pytest tests/ -v
 ```
