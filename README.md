@@ -12,12 +12,12 @@ A log-structured key-value storage engine based on the Bitcask paper. Read more 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/dxtym/pycask.git pycask
+git clone https://github.com/dxtym/pycask.git
 ```
 
 2. Install the package:
 ```bash
-pip install -e .
+pip install -e pycask
 ```
 
 ## Quickstart
@@ -39,7 +39,7 @@ value = p.get('key1')
 
 1. Install with dev dependencies:
 ```bash
-poetry install --with dev
+poetry install --extras dev
 ```
 
 2. Run unit tests:

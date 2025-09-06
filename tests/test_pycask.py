@@ -10,7 +10,7 @@ from pycask import Pycask
     ("4", {"a": 1, "b": 2}),
 ])
 def test_key_value_put_and_get(key, value):
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(delete=False) as temp_dir:
         p = Pycask(temp_dir)
         p.put(key, value)
         assert p.get(key) == value
@@ -22,7 +22,7 @@ def test_key_value_put_and_get(key, value):
     ("4", {"a": 1, "b": 2}),
 ])
 def test_key_value_delete(key, value):
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(delete=False) as temp_dir:
         p = Pycask(temp_dir)
         p.put(key, value)
         p.delete(key)
@@ -36,7 +36,7 @@ def test_key_value_delete(key, value):
     (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], [{"a": 1}, {"b": 2}, {"c": 3}, {"d": 4}, {"e": 5}, {"f": 6}, {"g": 7}, {"h": 8}, {"i": 9}, {"j": 10}]),
 ])
 def test_merge(keys, values):
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(delete=False) as temp_dir:
         p = Pycask(temp_dir)
         mem = {}
         for key, value in zip(keys, values):

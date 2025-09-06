@@ -196,7 +196,7 @@ class Pycask:
         entry = self.keydir.get(key, None)
         if entry is None:
             raise KeyError(f"Key '{key}' not found.")
-        if entry.value_size == 0:
+        if entry.value_size == TOMBSTONE:
             raise KeyError(f"Key '{key}' has been deleted.")
 
         filename = self._id_to_filename(entry.file_id)
