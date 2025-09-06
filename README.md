@@ -49,4 +49,4 @@ pytest tests/ -v
 
 ## License
 
-Academic Free License. See [LICENSE](LICENSE) for details.
+Unlicense. See [LICENSE](LICENSE) for details.
